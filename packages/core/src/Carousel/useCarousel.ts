@@ -3,7 +3,7 @@ import type { CarouselRootContext } from './CarouselRoot.vue'
 import type { CarouselAlign, CarouselContainScroll, CarouselItemSnapStyle, CarouselSlidesToScroll, CarouselSnap } from './utils'
 import type { BaseChangeReason, ChangeEventDetails, PartSurface } from '@/shared'
 import type { DataOrientation, Direction } from '@/shared/types'
-import { computed, ref, shallowRef, toValue } from 'vue'
+import { computed, nextTick, ref, shallowRef, toValue } from 'vue'
 import { createPartSurface, useControllableState } from '@/shared'
 import { chunk } from '@/shared/arrays'
 import { compareDocumentOrder } from '@/shared/documentOrder'
@@ -446,15 +446,23 @@ export function useCarousel(props: UseCarouselProps = {}): UseCarouselReturn {
     return index % size === leader ? { align } : {}
   }
 
+  // The index a controlled parent hasn't written back yet: a second step in the
+  // same tick starts from it, instead of repeating the first one.
+  let requested: number | undefined
   function changeModelValue(index: number, reason: CarouselChangeReason | BaseChangeReason = 'imperative-action', event?: Event) {
     const count = snapCount.value
     if (count > 0 && (index < 0 || index >= count))
       return false
-    return setState(index, reason, event)
+    const changed = setState(index, reason, event)
+    if (changed && modelValue.value !== index) {
+      requested = index
+      nextTick(() => requested = undefined)
+    }
+    return changed
   }
 
   function scrollStep(step: 1 | -1, reason: CarouselChangeReason | BaseChangeReason, event?: Event) {
-    const target = getStepTarget(modelValue.value, snaps.value, measured.value, loopActive.value, step)
+    const target = getStepTarget(requested ?? modelValue.value, snaps.value, measured.value, loopActive.value, step)
     return target === undefined ? false : changeModelValue(target, reason, event)
   }
 
