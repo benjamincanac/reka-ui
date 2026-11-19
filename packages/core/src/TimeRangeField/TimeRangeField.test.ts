@@ -176,6 +176,31 @@ describe('timeField', () => {
     expect(end.minute).toHaveTextContent(String(time.end.minute))
   })
 
+  it('updates segments when the value changes externally', async () => {
+    const { start, end, rerender } = setup({
+      timeRangeFieldProps: { modelValue: time, locale: 'en-GB' },
+    })
+
+    const nextTime = { start: new Time(10, 0), end: new Time(11, 30) }
+    await rerender({ timeRangeFieldProps: { modelValue: nextTime, locale: 'en-GB' } })
+
+    expect(start.hour).toHaveTextContent(String(nextTime.start.hour))
+    expect(start.minute).toHaveTextContent(String(nextTime.start.minute).padStart(2, '0'))
+    expect(end.hour).toHaveTextContent(String(nextTime.end.hour))
+    expect(end.minute).toHaveTextContent(String(nextTime.end.minute))
+  })
+
+  it('clears segments when the value is reset externally', async () => {
+    const { start, end, rerender } = setup({
+      timeRangeFieldProps: { modelValue: time, locale: 'en-GB' },
+    })
+
+    await rerender({ timeRangeFieldProps: { modelValue: null, locale: 'en-GB' } })
+
+    expect(start.hour).toHaveTextContent('––')
+    expect(end.minute).toHaveTextContent('––')
+  })
+
   it('modifying end value does not affect start value', async () => {
     const { start, end, user } = setup({
       timeRangeFieldProps: { modelValue: time, locale: 'en-GB' },
@@ -339,5 +364,17 @@ describe('timeField', () => {
     await user.keyboard('{1}{5}')
     // After finishing start minute, focus should move to end hour
     expect(end.hour).toHaveFocus()
+  })
+})
+
+describe('hidden input value', () => {
+  it.each([
+    { label: 'no value', modelValue: undefined, expected: '' },
+    { label: 'only a start', modelValue: { start: time.start, end: undefined }, expected: '' },
+    { label: 'only an end', modelValue: { start: undefined, end: time.end }, expected: '' },
+    { label: 'a complete range', modelValue: time, expected: '09:15:29 - 17:45:00' },
+  ])('is "$expected" for $label', ({ modelValue, expected }) => {
+    const { container } = setup({ timeRangeFieldProps: { modelValue, name: 'range' } })
+    expect(container.querySelector('input')).toHaveValue(expected)
   })
 })

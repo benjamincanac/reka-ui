@@ -24,6 +24,7 @@ import {
 
   syncTimeSegmentValues,
 
+  useSegmentNavigation,
 } from '@/shared/date'
 
 type TimeRangeFieldRootContext = {
@@ -321,20 +322,27 @@ const segmentContents = computed(() => ({
 
 const editableSegmentContents = computed(() => ({ start: segmentContents.value.start.filter(({ part }) => part !== 'literal'), end: segmentContents.value.end.filter(({ part }) => part !== 'literal') }))
 
-watch(convertedModelValue, (_modelValue) => {
-  const isStartChanged = _modelValue?.start && convertedStartValue.value
-    ? _modelValue.start.compare(convertedStartValue.value) !== 0
-    : _modelValue?.start !== convertedStartValue.value
+watch(modelValue, (_modelValue) => {
+  const isStartChanged = _modelValue?.start && startValue.value
+    ? convertValue(_modelValue.start).compare(convertValue(startValue.value)) !== 0
+    : _modelValue?.start !== startValue.value
   if (isStartChanged) {
-    convertedStartValue.value = _modelValue?.start?.copy()
+    startValue.value = _modelValue?.start?.copy()
   }
 
-  const isEndChanged = _modelValue?.end && convertedEndValue.value
-    ? _modelValue.end.compare(convertedEndValue.value) !== 0
-    : _modelValue?.end !== convertedEndValue.value
+  const isEndChanged = _modelValue?.end && endValue.value
+    ? convertValue(_modelValue.end).compare(convertValue(endValue.value)) !== 0
+    : _modelValue?.end !== endValue.value
   if (isEndChanged) {
-    convertedEndValue.value = _modelValue?.end?.copy()
+    endValue.value = _modelValue?.end?.copy()
   }
+})
+
+// The value the hidden native input submits. Only a complete range is a value:
+// while either end is missing it stays empty, so `required` reports `valueMissing`.
+const inputValue = computed(() => {
+  const { start, end } = modelValue.value ?? {}
+  return start && end ? `${start.toString()} - ${end.toString()}` : ''
 })
 
 watch([convertedStartValue, locale], ([_startValue]) => {
@@ -376,27 +384,11 @@ watch([convertedEndValue, locale], ([_endValue]) => {
 
 const currentFocusedElement = ref<HTMLElement | null>(null)
 
-const currentSegmentIndex = computed(() => Array.from(segmentElements.value).findIndex(el =>
-  el.getAttribute('data-reka-time-field-segment') === currentFocusedElement.value?.getAttribute('data-reka-time-field-segment')
-  && el.getAttribute('data-reka-time-range-field-segment-type') === currentFocusedElement.value?.getAttribute('data-reka-time-range-field-segment-type')))
-
-const nextFocusableSegment = computed(() => {
-  const sign = dir.value === 'rtl' ? -1 : 1
-  const nextCondition = sign < 0 ? currentSegmentIndex.value < 0 : currentSegmentIndex.value > segmentElements.value.size - 1
-  if (nextCondition)
-    return null
-  const segmentToFocus = Array.from(segmentElements.value)[currentSegmentIndex.value + sign]
-  return segmentToFocus
-})
-
-const prevFocusableSegment = computed(() => {
-  const sign = dir.value === 'rtl' ? -1 : 1
-  const prevCondition = sign > 0 ? currentSegmentIndex.value < 0 : currentSegmentIndex.value > segmentElements.value.size - 1
-  if (prevCondition)
-    return null
-
-  const segmentToFocus = Array.from(segmentElements.value)[currentSegmentIndex.value - sign]
-  return segmentToFocus
+const { nextFocusableSegment, prevFocusableSegment, focusNext } = useSegmentNavigation({
+  segmentElements,
+  currentFocusedElement,
+  dir,
+  segmentAttributes: ['data-reka-time-field-segment', 'data-reka-time-range-field-segment-type'],
 })
 
 const kbd = useKbd()
@@ -432,12 +424,7 @@ provideTimeRangeFieldRootContext({
   segmentContents: editableSegmentContents,
   elements: segmentElements,
   setFocusedElement,
-  focusNext() {
-    // Auto-advance follows the segments' DOM order (the locale's format
-    // order) regardless of writing direction; only arrow-key navigation is
-    // direction-aware via nextFocusableSegment/prevFocusableSegment.
-    Array.from(segmentElements.value)[currentSegmentIndex.value + 1]?.focus()
-  },
+  focusNext,
 })
 
 defineExpose({
@@ -468,8 +455,9 @@ defineExpose({
       :id="id"
       as="input"
       feature="focusable"
+      aria-hidden="true"
       tabindex="-1"
-      :value="`${modelValue?.start?.toString()} - ${modelValue?.end?.toString()}`"
+      :value="inputValue"
       :name="name"
       :disabled="disabled"
       :required="required"

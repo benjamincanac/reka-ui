@@ -3,7 +3,7 @@ import type { PrimitiveProps } from '@/Primitive'
 import type { AcceptableValue, DataOrientation, Direction, FormFieldProps } from '@/shared/types'
 import { usePrimitiveElement } from '@/Primitive'
 import { getFocusIntent } from '@/RovingFocus/utils'
-import { createContext, findValuesBetween, useDirection, useFormControl, useKbd, useTypeahead } from '@/shared'
+import { createContext, findValuesBetween, getActiveElement, useDirection, useFormControl, useKbd, useTypeahead } from '@/shared'
 import { Primitive } from '..'
 
 type ListboxRootContext<T> = {
@@ -14,6 +14,7 @@ type ListboxRootContext<T> = {
   dir: Ref<Direction>
   disabled: Ref<boolean>
   highlightOnHover: Ref<boolean>
+  loop: Ref<boolean>
   highlightedElement: Ref<HTMLElement | null>
   isVirtual: Ref<boolean>
   virtualFocusHook: EventHook<{ event?: Event, scroll: boolean }>
@@ -68,6 +69,8 @@ export interface ListboxRootProps<T = AcceptableValue> extends PrimitiveProps, F
   selectionBehavior?: 'toggle' | 'replace'
   /** When `true`, hover over item will trigger highlight */
   highlightOnHover?: boolean
+  /** When `true`, keyboard navigation will loop from last item to first, and vice versa. */
+  loop?: boolean
   /** Use this to compare objects by a particular field, or pass your own comparison function for complete control over how objects are compared. */
   by?: string | ((a: T, b: T) => boolean)
 }
@@ -107,8 +110,8 @@ defineSlots<{
   }) => any
 }>()
 
-const { multiple, highlightOnHover, orientation, disabled, selectionBehavior, dir: propDir } = toRefs(props)
-const { getItems } = useCollection<{ value: T }>({ isProvider: true })
+const { multiple, highlightOnHover, loop, orientation, disabled, selectionBehavior, dir: propDir } = toRefs(props)
+const { getItems, getItem } = useCollection<{ value: T }>({ isProvider: true })
 const { handleTypeaheadSearch } = useTypeahead()
 const { primitiveElement, currentElement } = usePrimitiveElement()
 const kbd = useKbd()
@@ -200,7 +203,7 @@ function changeHighlight(el: HTMLElement, scrollIntoView = true, focus?: boolean
     highlightedElement.value.scrollIntoView({ block: 'nearest' })
   }
 
-  const highlightedItem = getItems().find(i => i.ref === el)
+  const highlightedItem = getItem(el)
   emits('highlight', highlightedItem)
 }
 
@@ -291,6 +294,16 @@ function onLeave(event: Event) {
   emits('leave', event)
 }
 
+async function onFocusOut(event: FocusEvent) {
+  const target = (event.relatedTarget || event.target) as HTMLElement | null
+  await nextTick()
+  const root = currentElement.value
+  // A removed row loses the focus without a related target. The focus did not leave when a
+  // virtualized list has given it to the new row of the highlighted option by now.
+  if (highlightedElement.value && root && !root.contains(target) && !root.contains(getActiveElement()))
+    onLeave(event)
+}
+
 function onEnter(event: Event) {
   const entryFocusEvent = new CustomEvent('listbox.entryFocus', { bubbles: false, cancelable: true })
   event.currentTarget?.dispatchEvent(entryFocusEvent)
@@ -308,6 +321,19 @@ function onEnter(event: Event) {
   }
 }
 
+function isAtVirtualBoundary(intent: 'prev' | 'next') {
+  // A virtualized list only renders a window of items. Only wrap when that
+  // window reaches the end of the full options list; any rendered items past
+  // the highlighted one are disabled.
+  const rendered = getItems(true).map(i => i.ref)
+  const edge = intent === 'next' ? rendered.at(-1) : rendered[0]
+  if (!edge)
+    return false
+  const position = Number(edge.getAttribute('aria-posinset'))
+  const size = Number(edge.getAttribute('aria-setsize'))
+  return intent === 'next' ? position === size : position === 1
+}
+
 function onKeydownNavigation(event: KeyboardEvent) {
   const intent = getFocusIntent(event, orientation.value, dir.value)
   if (!intent)
@@ -323,7 +349,18 @@ function onKeydownNavigation(event: KeyboardEvent) {
         collection.reverse()
 
       const currentIndex = collection.indexOf(highlightedElement.value)
-      collection = collection.slice(currentIndex + 1)
+      const shouldLoop = loop.value && currentIndex === collection.length - 1
+      if (shouldLoop && isVirtual.value) {
+        if (isAtVirtualBoundary(intent)) {
+          // Let the virtualizer scroll to and highlight the opposite end.
+          const key = intent === 'next' ? kbd.HOME : kbd.END
+          return virtualKeydownHook.trigger(new KeyboardEvent('keydown', { key, shiftKey: event.shiftKey }))
+        }
+        collection = []
+      }
+      else {
+        collection = shouldLoop ? collection.slice(0, 1) : collection.slice(currentIndex + 1)
+      }
     }
     handleMultipleReplace(event, collection[0])
   }
@@ -425,6 +462,7 @@ provideListboxRootContext({
   dir,
   disabled,
   highlightOnHover,
+  loop,
   highlightedElement,
   isVirtual,
   virtualFocusHook,
@@ -455,13 +493,7 @@ provideListboxRootContext({
     :dir="dir"
     :data-disabled="disabled ? '' : undefined"
     @pointerleave="onLeave"
-    @focusout="async (event: FocusEvent) => {
-      const target = (event.relatedTarget || event.target) as HTMLElement | null
-      await nextTick()
-      if (highlightedElement && currentElement && !currentElement.contains(target)) {
-        onLeave(event)
-      }
-    }"
+    @focusout="onFocusOut"
   >
     <slot :model-value="modelValue" />
 
