@@ -38,7 +38,7 @@
   {
     "path": "dist/index.js",
     "import": "{ TreeRoot, TreeItem, TreeVirtualizer }",
-    "limit": "13 KB",
+    "limit": "14 KB",
     "name": "Tree"
   },
   {
@@ -55,8 +55,14 @@
   },
   {
     "path": "dist/index.js",
+    "import": "{ CarouselRoot, CarouselViewport, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext, CarouselIndicatorGroup, CarouselIndicator, CarouselAutoplayToggle }",
+    "limit": "14 KB",
+    "name": "Carousel"
+  },
+  {
+    "path": "dist/index.js",
     "import": "*",
-    "limit": "170 KB",
+    "limit": "179 KB",
     "name": "Full library"
   }
 ]
